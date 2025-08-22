@@ -93,6 +93,19 @@ app.get('/api/inventario/cat_implemento/:categoria', (req, res) => {
 });
 
 
+app.get('/api/inventario/implemento/:id_implemento', (req, res) => {
+    const id_implemento = req.params.id_implemento;
+    const sql = 'SELECT * FROM `implemento` WHERE id_implemento = ?;';
+    db.query(sql, [id_implemento], (err, results) => {
+        if (err) {
+            console.error('❌ Error al obtener implementos:', err);
+            return res.status(500).json({ mensaje: 'Error al obtener implementos' });
+        }
+        res.json(results[0]);
+    });
+});
+
+
 //API PARA FILTRAR POR CATEGORIA
 app.get('/api/inventario/implemento',(req,res)=>{
     const categoria = req.body
