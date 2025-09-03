@@ -26,6 +26,7 @@ app.post('/api/inventario/implemento', (req, res) => {
     departamento,
     condicion,
     pertenencia,
+    propietario,
     valor,
     fecha
   } = req.body;
@@ -33,14 +34,14 @@ app.post('/api/inventario/implemento', (req, res) => {
   const sql = `
     INSERT INTO implemento (
       id_implemento, nombre, categoria, departamento, condicion,
-      pertenencia, valor, fecha
-    ) VALUES (?, ?, ?, ?, ?,?, ?, ?)
+      pertenencia, propietario, valor, fecha
+    ) VALUES (?, ?, ?, ?, ?, ? , ? , ?, ?)
   `;
 
 
   db.query(sql, [
     id_implemento, nombre, categoria, departamento, condicion,
-    pertenencia, valor, fecha
+    pertenencia, propietario, valor, fecha
   ], (err, result) => {
     if (err) {
       console.error('❌ Error al insertar:', err);
@@ -56,7 +57,17 @@ app.listen(3000,()=>{
 })
 
 app.get('/api/inventario/implemento',(req,res)=>{
-    const sql = 'SELECT i.id_implemento, i.nombre, i.categoria, D.nombre as departamento, i.condicion, i.pertenencia, i.cantidad, i.valor, i.estado, i.fecha FROM inventario.implemento AS I LEFT JOIN inventario.departamento as D ON D.id = I.departamento;';
+    const sql = `SELECT i.id_implemento, i.nombre, 
+    i.categoria, 
+    d.nombre AS departamento, 
+    i.condicion, 
+    i.pertenencia, 
+    p.nombre_proveedor AS propietario,
+    i.cantidad, 
+    i.valor, 
+    i.estado, 
+    i.fecha FROM inventario.implemento AS i LEFT JOIN inventario.departamento AS d ON d.id = i.departamento LEFT JOIN inventario.propietario AS p ON p.id = i.propietario;`;
+
     db.query(sql, (err, results) =>{
         if (err){
             console.error('❌ Error al obtener datos:', err);
@@ -118,3 +129,34 @@ app.get('/api/inventario/implemento',(req,res)=>{
         res.json(results);
     });
 })
+
+app.post('/api/inventario/implemento/:id_implemento', (req, res) => {
+    const {
+    id_implemento,
+    nombre,
+    categoria,
+    departamento,
+    condicion,
+    pertenencia,
+    propietario,
+    valor,
+    fecha,
+    estado} = req.body;
+
+
+    const sql = `UPDATE implemento SET id_implemento = ?, nombre = ?, categoria = ?, 
+    departamento = ?, condicion = ?, pertenencia = ?, propietario = ? valor = ?, fecha = ?, 
+    estado = ? WHERE id_implemento = ?;`
+
+    db.query(sql, [
+      id_implemento, nombre, categoria, departamento, condicion,
+      pertenencia, propietario, valor, fecha, estado, id_implemento
+    ], (err, result) => {
+      if (err) {
+        console.error('❌ Error al actualizar:', err);
+        return res.status(500).json({ mensaje: 'Error al actualizar en la base de datos' });
+      }
+      res.json({ mensaje: '✅ Datos actualizados correctamente' });
+      console.log(req.body);
+    });
+});
