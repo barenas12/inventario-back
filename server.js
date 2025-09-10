@@ -20,7 +20,6 @@ db.connect(err => {
 
 app.post('/api/inventario/implemento', (req, res) => {
   const {
-    id_implemento,
     nombre,
     categoria,
     departamento,
@@ -31,16 +30,18 @@ app.post('/api/inventario/implemento', (req, res) => {
     fecha
   } = req.body;
 
+  console.log("Datos recibidos:", req.body);
+
   const sql = `
-    INSERT INTO implemento (
-      id_implemento, nombre, categoria, departamento, condicion,
-      pertenencia, propietario, valor, fecha
-    ) VALUES (?, ?, ?, ?, ?, ? , ? , ?, ?)
+    INSERT INTO inventario.implemento (
+    nombre, categoria, departamento, condicion,
+    pertenencia, propietario, valor, fecha
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
 
   db.query(sql, [
-    id_implemento, nombre, categoria, departamento, condicion,
+    nombre, categoria, departamento, condicion,
     pertenencia, propietario, valor, fecha
   ], (err, result) => {
     if (err) {
@@ -56,8 +57,13 @@ app.listen(3000,()=>{
     console.log('servidor corriendo en el puerto 3000');
 })
 
-app.get('/api/inventario/implemento',(req,res)=>{
-    const sql = `SELECT i.id_implemento, i.nombre, 
+app.get('/api/inventario/implemento', (req, res) => {
+  const sql = `SELECT 
+CONCAT('ARCSAS-',
+	CASE 
+		WHEN i.categoria = 'Muebles' THEN 'M'
+        ELSE 'T'
+        END,i.id) AS id_implemento, i.nombre, 
     i.categoria, 
     d.nombre AS departamento, 
     i.condicion, 
@@ -68,13 +74,13 @@ app.get('/api/inventario/implemento',(req,res)=>{
     i.estado, 
     i.fecha FROM inventario.implemento AS i LEFT JOIN inventario.departamento AS d ON d.id = i.departamento LEFT JOIN inventario.propietario AS p ON p.id = i.propietario;`;
 
-    db.query(sql, (err, results) =>{
-        if (err){
-            console.error('❌ Error al obtener datos:', err);
-            return res.status(500).json({ mensaje: 'Error al obtener datos' });
-        }
-        res.json(results);
-    })
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener datos:', err);
+      return res.status(500).json({ mensaje: 'Error al obtener datos' });
+    }
+    res.json(results);
+  })
 })
 
 
@@ -132,7 +138,6 @@ app.get('/api/inventario/implemento',(req,res)=>{
 
 app.post('/api/inventario/implemento/:id_implemento', (req, res) => {
     const {
-    id_implemento,
     nombre,
     categoria,
     departamento,
@@ -142,6 +147,8 @@ app.post('/api/inventario/implemento/:id_implemento', (req, res) => {
     valor,
     fecha,
     estado} = req.body;
+
+    const { id_implemento } = req.params; 
 
 
     const sql = `UPDATE implemento SET id_implemento = ?, nombre = ?, categoria = ?, 
@@ -156,6 +163,9 @@ app.post('/api/inventario/implemento/:id_implemento', (req, res) => {
         console.error('❌ Error al actualizar:', err);
         return res.status(500).json({ mensaje: 'Error al actualizar en la base de datos' });
       }
+      if (result.affectedRows === 0) {
+                return res.status(404).json({ mensaje: 'No se encontró el implemento con ese ID' });
+            }
       res.json({ mensaje: '✅ Datos actualizados correctamente' });
       console.log(req.body);
     });
