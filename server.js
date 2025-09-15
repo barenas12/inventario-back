@@ -117,12 +117,15 @@ app.get('/api/inventario/cat_implemento/:categoria', (req, res) => {
 
 app.get('/api/inventario/implemento/:id', (req, res) => {
   const id = req.params.id;
-  const sql = `SELECT * ,
+  const sql = `SELECT implemento.nombre, implemento.categoria, implemento.condicion, implemento.pertenencia, 
+  implemento.propietario, implemento.cantidad, implemento.valor, implemento.fecha, implemento.estado,implemento.departamento,
     CONCAT('ARCSAS-',
 	  CASE 
 		WHEN categoria = 'Muebles' THEN 'M'
         ELSE 'T'
-        END,id) AS id_implemento FROM implemento WHERE id = ?;`;
+        END,implemento.id) AS id_implemento
+        FROM implemento
+        WHERE implemento.id = ?;`;
   db.query(sql, [id], (err, results) => {
     if (err) {
       console.error('❌ Error al obtener implementos:', err);
