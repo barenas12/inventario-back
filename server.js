@@ -32,7 +32,9 @@ app.post('/api/inventario/implemento', (req, res) => {
     pertenencia,
     propietario,
     valor,
-    fecha
+    fecha,
+    sede,
+    descripcion
   } = req.body || {};
 
   console.log("Datos recibidos:", req.body);
@@ -40,14 +42,13 @@ app.post('/api/inventario/implemento', (req, res) => {
   const sql = `
     INSERT INTO inventario.implemento (
     nombre, categoria, departamento, condicion,
-    pertenencia, propietario, valor, fecha
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `;
+    pertenencia, propietario, valor, fecha, sede, descripcion
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 
   db.query(sql, [
     nombre, categoria, departamento, condicion,
-    pertenencia, propietario, valor, fecha
+    pertenencia, propietario, valor, fecha, sede, descripcion
   ], (err, result) => {
     if (err) {
       console.error('❌ Error al insertar:', err);
@@ -76,8 +77,11 @@ CONCAT('ARCSAS-',
     p.nombre_proveedor AS propietario,
     i.cantidad, 
     i.valor, 
-    i.estado, 
-    i.fecha FROM inventario.implemento AS i LEFT JOIN inventario.departamento AS d ON d.id = i.departamento LEFT JOIN inventario.propietario AS p ON p.id = i.propietario;`;
+    i.estado,
+    i.sede,
+    i.descripcion,
+    i.fecha FROM inventario.implemento AS i 
+    LEFT JOIN inventario.departamento AS d ON d.id = i.departamento LEFT JOIN inventario.propietario AS p ON p.id = i.propietario;`;
 
   db.query(sql, (err, results) => {
     if (err) {
@@ -118,7 +122,7 @@ app.get('/api/inventario/cat_implemento/:categoria', (req, res) => {
 app.get('/api/inventario/implemento/:id', (req, res) => {
   const id = req.params.id;
   const sql = `SELECT implemento.nombre, implemento.categoria, implemento.condicion, implemento.pertenencia, 
-  implemento.propietario, implemento.cantidad, implemento.valor, implemento.fecha, implemento.estado,implemento.departamento,
+  implemento.propietario, implemento.cantidad, implemento.valor, implemento.fecha, implemento.estado,implemento.departamento,implemento.sede, implemento.descripcion,implemento.estado,
     CONCAT('ARCSAS-',
 	  CASE 
 		WHEN categoria = 'Muebles' THEN 'M'
@@ -161,6 +165,8 @@ app.put('/api/inventario/implemento/:id', (req, res) => {
     propietario,
     valor,
     fecha,
+    sede,
+    descripcion,
     estado } = req.body;
 
   const { id } = req.params;
@@ -168,11 +174,11 @@ app.put('/api/inventario/implemento/:id', (req, res) => {
 
   const sql = `UPDATE implemento SET nombre = ?, categoria = ?, 
     departamento = ?, condicion = ?, pertenencia = ?, propietario = ?, valor = ?, fecha = ?, 
-    estado = ? WHERE id = ?;`
+    sede = ?, descripcion = ?, estado = ? WHERE id = ?;`
 
   db.query(sql, [
     nombre, categoria, departamento, condicion,
-    pertenencia, propietario, valor, fecha, estado, id
+    pertenencia, propietario, valor, fecha, sede, descripcion, estado, id
   ], (err, result) => {
     if (err) {
       console.error('❌ Error al actualizar:', err);
@@ -207,7 +213,10 @@ app.get("/api/exportar", async (req, res) => {
       i.cantidad,
       i.valor,
       i.estado,
-      i.fecha
+      i.fecha,
+      i.sede,
+      i.descripcion,
+      i.estado
     FROM inventario.implemento AS i
     LEFT JOIN inventario.departamento AS d 
       ON d.id = i.departamento
@@ -237,6 +246,8 @@ app.get("/api/exportar", async (req, res) => {
         { header: "Propietario", key: "propietario", width: 25 },
         { header: "Cantidad", key: "cantidad", width: 10 },
         { header: "Valor", key: "valor", width: 15 },
+        { header: "Sede", key: "sede", width: 15 },
+        { header: "Descripción", key: "descripcion", width: 20 },
         { header: "Estado", key: "estado", width: 15 },
         { header: "Fecha", key: "fecha", width: 20 }
       ];
