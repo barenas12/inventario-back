@@ -34,7 +34,8 @@ app.post('/api/inventario/implemento', (req, res) => {
     valor,
     fecha,
     sede,
-    descripcion
+    descripcion,
+    responsable
   } = req.body || {};
 
   console.log("Datos recibidos:", req.body);
@@ -42,13 +43,13 @@ app.post('/api/inventario/implemento', (req, res) => {
   const sql = `
     INSERT INTO inventario.implemento (
     nombre, categoria, departamento, condicion,
-    pertenencia, propietario, valor, fecha, sede, descripcion
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    pertenencia, propietario, valor, fecha, sede, descripcion, responsable
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 
   db.query(sql, [
     nombre, categoria, departamento, condicion,
-    pertenencia, propietario, valor, fecha, sede, descripcion
+    pertenencia, propietario, valor, fecha, sede, descripcion, responsable
   ], (err, result) => {
     if (err) {
       console.error('❌ Error al insertar:', err);
@@ -80,8 +81,10 @@ CONCAT('ARCSAS-',
     i.estado,
     i.sede,
     i.descripcion,
+    r.nombre AS responsable,
     i.fecha FROM inventario.implemento AS i 
-    LEFT JOIN inventario.departamento AS d ON d.id = i.departamento LEFT JOIN inventario.propietario AS p ON p.id = i.propietario;`;
+    LEFT JOIN inventario.departamento AS d ON d.id = i.departamento LEFT JOIN inventario.propietario AS p ON p.id = i.propietario 
+    LEFT JOIN inventario.responsable AS r ON responsable = r.id;`;
 
   db.query(sql, (err, results) => {
     if (err) {
@@ -95,7 +98,19 @@ CONCAT('ARCSAS-',
 
 //API PARA RECORRER DEPARTAMENTOS
 app.get('/api/inventario/departamento', (req, res) => {
-  const sql = 'SELECT * FROM inventario.departamento ORDER BY nombre ASC;';
+  const sql = 'SELECT * FROM inventario.departamento WHERE estado="Activo" ORDER BY nombre ASC;';
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener datos:', err);
+      return res.status(500).json({ mensaje: 'Error al obtener datos' });
+    }
+    res.json(results);
+  })
+})
+
+//API PARA RECORRER RESPONSABLE
+app.get('/api/inventario/responsable', (req, res) => {
+  const sql = 'SELECT * FROM inventario.responsable WHERE Estado="Activo" ORDER BY nombre ASC;';
   db.query(sql, (err, results) => {
     if (err) {
       console.error('❌ Error al obtener datos:', err);
@@ -121,15 +136,30 @@ app.get('/api/inventario/cat_implemento/:categoria', (req, res) => {
 
 app.get('/api/inventario/implemento/:id', (req, res) => {
   const id = req.params.id;
-  const sql = `SELECT implemento.nombre, implemento.categoria, implemento.condicion, implemento.pertenencia, 
-  implemento.propietario, implemento.cantidad, implemento.valor, implemento.fecha, implemento.estado,implemento.departamento,implemento.sede, implemento.descripcion,implemento.estado,
-    CONCAT('ARCSAS-',
-	  CASE 
-		WHEN categoria = 'Muebles' THEN 'M'
-        ELSE 'T'
-        END,implemento.id) AS id_implemento
-        FROM implemento
-        WHERE implemento.id = ?;`;
+  const sql = `SELECT 
+  implemento.nombre, 
+  implemento.categoria, 
+  implemento.condicion, 
+  implemento.pertenencia, 
+  implemento.propietario, 
+  implemento.cantidad, 
+  implemento.valor, 
+  implemento.fecha, 
+  implemento.estado, 
+  implemento.departamento, 
+  implemento.sede, 
+  implemento.descripcion,
+  implemento.responsable AS responsable,
+  CONCAT('ARCSAS-',
+    CASE 
+      WHEN implemento.categoria = 'Muebles' THEN 'M'
+      ELSE 'T'
+    END,
+    implemento.id
+  ) AS id_implemento
+FROM implemento
+LEFT JOIN inventario.responsable AS r ON implemento.responsable = r.id
+WHERE implemento.id = ?;`;
   db.query(sql, [id], (err, results) => {
     if (err) {
       console.error('❌ Error al obtener implementos:', err);
@@ -167,18 +197,19 @@ app.put('/api/inventario/implemento/:id', (req, res) => {
     fecha,
     sede,
     descripcion,
+    responsable,
     estado } = req.body;
 
   const { id } = req.params;
 
 
   const sql = `UPDATE implemento SET nombre = ?, categoria = ?, 
-    departamento = ?, condicion = ?, pertenencia = ?, propietario = ?, valor = ?, fecha = ?, 
+    departamento = ?, condicion = ?, pertenencia = ?, propietario = ?, responsable = ?, valor = ?, fecha = ?, 
     sede = ?, descripcion = ?, estado = ? WHERE id = ?;`
 
   db.query(sql, [
     nombre, categoria, departamento, condicion,
-    pertenencia, propietario, valor, fecha, sede, descripcion, estado, id
+    pertenencia, propietario, responsable, valor, fecha, sede, descripcion, estado, id
   ], (err, result) => {
     if (err) {
       console.error('❌ Error al actualizar:', err);
@@ -209,6 +240,7 @@ app.get("/api/exportar", async (req, res) => {
       d.nombre AS departamento,
       i.condicion,
       i.pertenencia,
+      r.nombre as Responsable,
       p.nombre_proveedor AS propietario,
       i.cantidad,
       i.valor,
@@ -221,7 +253,9 @@ app.get("/api/exportar", async (req, res) => {
     LEFT JOIN inventario.departamento AS d 
       ON d.id = i.departamento
     LEFT JOIN inventario.propietario AS p 
-      ON p.id = i.propietario;
+      ON p.id = i.propietario
+      LEFT JOIN inventario.responsable AS r
+      ON r.id = i.responsable;
   `;
 
   connection.query(sql, async (err, results) => {
@@ -237,19 +271,20 @@ app.get("/api/exportar", async (req, res) => {
 
       // Encabezados
       worksheet.columns = [
-        { header: "ID Implemento", key: "id_implemento", width: 20 },
-        { header: "Nombre", key: "nombre", width: 25 },
+        { header: "ID Implemento", key: "id_implemento", width: 15 },
+        { header: "Nombre", key: "nombre", width: 30 },
         { header: "Categoría", key: "categoria", width: 20 },
-        { header: "Departamento", key: "departamento", width: 20 },
-        { header: "Condición", key: "condicion", width: 15 },
-        { header: "Pertenencia", key: "pertenencia", width: 15 },
-        { header: "Propietario", key: "propietario", width: 25 },
+        { header: "Departamento", key: "departamento", width: 35 },
+        { header: "Condición", key: "condicion", width: 10 },
+        { header: "Pertenencia", key: "pertenencia", width: 12 },
+        { header: "Propietario", key: "propietario", width: 15 },
+        {header: "Responsable", key: "Responsable", width: 30 },
         { header: "Cantidad", key: "cantidad", width: 10 },
-        { header: "Valor", key: "valor", width: 15 },
-        { header: "Sede", key: "sede", width: 15 },
-        { header: "Descripción", key: "descripcion", width: 20 },
-        { header: "Estado", key: "estado", width: 15 },
-        { header: "Fecha", key: "fecha", width: 20 }
+        { header: "Valor", key: "valor", width: 10 },
+        { header: "Sede", key: "sede", width: 10 },
+        { header: "Descripción", key: "descripcion", width: 25 },
+        { header: "Estado", key: "estado", width: 13 },
+        { header: "Fecha", key: "fecha", width: 13 }
       ];
 
       // Insertar datos
