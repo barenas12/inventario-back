@@ -2,6 +2,7 @@ const express = require("express");
 const mysql = require("mysql2");
 const cors = require("cors");
 const ExcelJS = require("exceljs");
+const { name } = require("ejs");
 
 const app = express();
 app.use(cors());
@@ -335,5 +336,28 @@ app.get("/api/exportar", async (req, res) => {
       console.error("❌ Error generando Excel:", error);
       res.status(500).send("Error generando Excel");
     }
+  });
+});
+
+
+/////////////// VALIDACIONES DE USUARIO - PASSWORD ///////////////////////
+
+app.get('/api/login/users/:id', (req, res) => {
+  const user = req.params.id;
+
+  const sql = `
+    SELECT password 
+    FROM login.users
+    WHERE user = ? AND status = "Activo";
+  `;
+
+  db.query(sql, [user], (err, results) => {
+    if (err) return res.status(500).json({ mensaje: 'Error DB' });
+
+    if (results.length === 0) {
+      return res.status(404).json({ mensaje: 'Usuario no encontrado' });
+    }
+
+    res.json(results[0]); // { password: '1234' }
   });
 });
