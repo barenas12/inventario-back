@@ -1,29 +1,83 @@
 const express = require("express");
-const mysql = require("mysql2");
-const cors = require("cors");
 const ExcelJS = require("exceljs");
-const { name } = require("ejs");
+const cors = require('cors');
+const cookieParser = require('cookie-parser');
+const db = require("./config/db");
+const loginDB = require("./config/dbLogin");
+const bcrypt = require("bcrypt");
+require("dotenv").config();
+const PORT = process.env.PORT || 3000;
 
 const app = express();
-app.use(cors());
+
+// Agrega middlewares necesarios
+app.use(cors({
+  origin: ["http://127.0.0.1:5500", "http://localhost:5500"],
+  credentials: true
+}));
+app.use(cookieParser());
 app.use(express.json());
 
-// 🔗 Crear conexión a MySQL
-const connection = mysql.createConnection({
-  host: "localhost",
-  user: "root",
-  password: "",
-  database: "inventario"
-});
+const authRoutes = require('./modules/auth/auth.routes');
+app.use('/auth', authRoutes);
 
-connection.connect(err => {
-  if (err) {
-    console.error("❌ Error conectando a MySQL:", err);
-    return;
+// ✅ RUTA DE LOGIN
+app.post('/api/login', (req, res) => {
+  const { user, password } = req.body;
+
+  if (!user || !password) {
+    return res.status(400).json({ mensaje: 'Usuario y contraseña requeridos' });
   }
-  console.log("✅ Conectado a MySQL");
+
+  const sql = `
+    SELECT id, user, password_hash, role
+    FROM users
+    WHERE user = ? AND status = 'Activo'
+    LIMIT 1;
+  `;
+
+  loginDB.query(sql, [user], async (err, results) => {
+    if (err) {
+      console.error('DB LOGIN ERROR:', err);
+      return res.status(500).json({ mensaje: 'Error en base de datos' });
+    }
+
+    if (!results || results.length === 0) {
+      console.log('❌ Usuario no encontrado:', user);
+      return res.status(401).json({ mensaje: 'Credenciales inactivas o no encontradas' });
+    }
+
+    const usuario = results[0];
+    const passwordOk = await bcrypt.compare(password, usuario.password_hash);
+
+    if (!passwordOk) {
+      console.log('❌ Contraseña incorrecta para:', user);
+      return res.status(401).json({ mensaje: 'Credenciales inválidas' });
+    }
+
+    console.log('✅ Login exitoso para:', user);
+    
+    res.json({
+      mensaje: 'Login exitoso ✅',
+      user: usuario.user,
+      role: usuario.role
+    });
+  });
 });
 
+// ✅ RUTA PARA VERIFICAR TOKEN (opcional, para refrescar sesión)
+app.get('/api/verify-token', (req, res) => {
+  res.json({
+    mensaje: 'Token válido'
+  });
+});
+
+// ✅ RUTA PARA LOGOUT (opcional)
+app.post('/api/logout', (req, res) => {
+  res.json({ mensaje: 'Sesión cerrada correctamente' });
+});
+
+// ✅ Aplicar verificación a las rutas protegidas
 app.post('/api/inventario/implemento', (req, res) => {
   const {
     nombre,
@@ -47,7 +101,6 @@ app.post('/api/inventario/implemento', (req, res) => {
     pertenencia, propietario, valor, fecha, sede, descripcion, responsable
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-
   db.query(sql, [
     nombre, categoria, departamento, condicion,
     pertenencia, propietario, valor, fecha, sede, descripcion, responsable
@@ -60,16 +113,11 @@ app.post('/api/inventario/implemento', (req, res) => {
   });
 });
 
-
-app.listen(3000, () => {
-  console.log('servidor corriendo en el puerto 3000');
-})
-
 app.get('/api/inventario/implemento', (req, res) => {
   const sql = `SELECT 
 CONCAT('ARCSAS-',
-	CASE 
-		WHEN i.categoria = 'Muebles' THEN 'M'
+    CASE 
+        WHEN i.categoria = 'Muebles' THEN 'M'
         ELSE 'T'
         END,i.id) AS id_implemento, i.nombre,i.id, 
     i.categoria, 
@@ -94,10 +142,8 @@ CONCAT('ARCSAS-',
     }
     res.json(results);
   })
-})
+});
 
-
-//API PARA RECORRER DEPARTAMENTOS
 app.get('/api/inventario/departamento', (req, res) => {
   const sql = 'SELECT * FROM inventario.departamento WHERE estado="Activo" ORDER BY nombre ASC;';
   db.query(sql, (err, results) => {
@@ -107,9 +153,8 @@ app.get('/api/inventario/departamento', (req, res) => {
     }
     res.json(results);
   })
-})
+});
 
-//API PARA RECORRER RESPONSABLE
 app.get('/api/inventario/responsable', (req, res) => {
   const sql = 'SELECT * FROM inventario.responsable WHERE Estado="Activo" ORDER BY nombre ASC;';
   db.query(sql, (err, results) => {
@@ -119,9 +164,8 @@ app.get('/api/inventario/responsable', (req, res) => {
     }
     res.json(results);
   })
-})
+});
 
-//API PARA RECORRER NOMBRE ACORDE AL IMPLEMENTO
 app.get('/api/inventario/cat_implemento/:categoria', (req, res) => {
   const categoria = req.params.categoria;
   const sql = 'SELECT * FROM inventario.cat_implemento WHERE categoria = ? ORDER BY nom_implemento ASC;';
@@ -133,7 +177,6 @@ app.get('/api/inventario/cat_implemento/:categoria', (req, res) => {
     res.json(results);
   });
 });
-
 
 app.get('/api/inventario/implemento/:id', (req, res) => {
   const id = req.params.id;
@@ -170,21 +213,15 @@ WHERE implemento.id = ?;`;
   });
 });
 
-
-//API PARA FILTRAR POR CATEGORIA
-app.get('/api/inventario/implemento', (req, res) => {
-  const categoria = req.body
+app.get('/api/inventario/implemento/categoria/:categoria', (req, res) => {
+  const { categoria } = req.params;
   const sql = 'SELECT * FROM inventario.implemento WHERE categoria = ?';
+
   db.query(sql, [categoria], (err, results) => {
-    if (err) {
-      console.error('❌ Error al obtener datos:', err);
-      return res.status(500).json({ mensaje: 'Error al obtener datos' });
-    }
+    if (err) return res.status(500).json({ mensaje: 'Error' });
     res.json(results);
   });
-})
-
-
+});
 
 app.put('/api/inventario/implemento/:id', (req, res) => {
   const {
@@ -203,7 +240,6 @@ app.put('/api/inventario/implemento/:id', (req, res) => {
 
   const { id } = req.params;
 
-
   const sql = `UPDATE implemento SET nombre = ?, categoria = ?, 
     departamento = ?, condicion = ?, pertenencia = ?, propietario = ?, responsable = ?, valor = ?, fecha = ?, 
     sede = ?, descripcion = ?, estado = ? WHERE id = ?;`
@@ -219,14 +255,9 @@ app.put('/api/inventario/implemento/:id', (req, res) => {
     if (result.affectedRows === 0) {
       return res.status(404).json({ mensaje: 'No se encontró el implemento con ese ID' });
     }
-    console.log(req.body);
+    return res.json({ mensaje: '✅ Datos actualizados correctamente' });
   });
 });
-
-
-//Exportar archivos
-
-const db = connection;
 
 app.get("/api/exportar", async (req, res) => {
   const sql = `
@@ -259,18 +290,16 @@ app.get("/api/exportar", async (req, res) => {
       ON r.id = i.responsable;
   `;
 
-  connection.query(sql, async (err, results) => {
+  db.query(sql, async (err, results) => {
     if (err) {
       console.error("❌ Error en la consulta:", err);
       return res.status(500).send("Error exportando datos");
     }
 
     try {
-      // Crear libro y hoja
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet("Inventario");
 
-      // Encabezados
       worksheet.columns = [
         { header: "ID Implemento", key: "id_implemento", width: 15 },
         { header: "Nombre", key: "nombre", width: 30 },
@@ -279,7 +308,7 @@ app.get("/api/exportar", async (req, res) => {
         { header: "Condición", key: "condicion", width: 10 },
         { header: "Pertenencia", key: "pertenencia", width: 12 },
         { header: "Propietario", key: "propietario", width: 15 },
-        {header: "Responsable", key: "Responsable", width: 30 },
+        { header: "Responsable", key: "Responsable", width: 30 },
         { header: "Cantidad", key: "cantidad", width: 10 },
         { header: "Valor", key: "valor", width: 10 },
         { header: "Sede", key: "sede", width: 10 },
@@ -288,16 +317,14 @@ app.get("/api/exportar", async (req, res) => {
         { header: "Fecha", key: "fecha", width: 13 }
       ];
 
-      // Insertar datos
       results.forEach(row => worksheet.addRow(row));
 
-      // 🎨 Estilo de encabezados (fila 1)
       worksheet.getRow(1).eachCell(cell => {
-        cell.font = { bold: true, color: { argb: "FFFFFFFF" } }; // Blanco
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
         cell.fill = {
           type: "pattern",
           pattern: "solid",
-          fgColor: { argb: "4472C4" } // Azul
+          fgColor: { argb: "4472C4" }
         };
         cell.alignment = { vertical: "middle", horizontal: "center" };
         cell.border = {
@@ -308,7 +335,6 @@ app.get("/api/exportar", async (req, res) => {
         };
       });
 
-      // 🎨 Estilo para las filas de datos
       worksheet.eachRow((row, rowNumber) => {
         if (rowNumber !== 1) {
           row.eachCell(cell => {
@@ -323,7 +349,6 @@ app.get("/api/exportar", async (req, res) => {
         }
       });
 
-      // Configurar descarga
       res.setHeader(
         "Content-Type",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -339,25 +364,6 @@ app.get("/api/exportar", async (req, res) => {
   });
 });
 
-
-/////////////// VALIDACIONES DE USUARIO - PASSWORD ///////////////////////
-
-app.get('/api/login/users/:id', (req, res) => {
-  const user = req.params.id;
-
-  const sql = `
-    SELECT password 
-    FROM login.users
-    WHERE user = ? AND status = "Activo";
-  `;
-
-  db.query(sql, [user], (err, results) => {
-    if (err) return res.status(500).json({ mensaje: 'Error DB' });
-
-    if (results.length === 0) {
-      return res.status(404).json({ mensaje: 'Usuario no encontrado' });
-    }
-
-    res.json(results[0]); // { password: '1234' }
-  });
+app.listen(PORT, () => {
+  console.log(`🚀 API corriendo en http://localhost:${PORT}`);
 });

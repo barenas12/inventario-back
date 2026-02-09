@@ -1,39 +1,33 @@
-const express = require('express')
-const dotenv = require('dotenv')
-const cookieParser = require('cookie-parser')
+const express = require("express");
+const cors = require("cors");
+const mysql = require("mysql2");
+const ExcelJS = require("exceljs");
+require("dotenv").config();
 
-const app = express()
+const app = express();
 
-//setear el motor de plantillas
-app.set('view engine','ejs')
+app.use(express.json());
 
-//setear carpeta public para archivo estático
-app.use(express.static('public'))
+// 🔗 Conexión a MySQL
+const connection = mysql.createConnection({
+  host: "localhost",
+  user: "root",
+  password: "",
+  database: "inventario"
+});
 
-//para procesar datos enviados desde forms
-app.use(express.urlencoded({extended:true}))
-app.use(express.json())
+connection.connect(err => {
+  if (err) {
+    console.error("❌ Error conectando a MySQL:", err);
+    return;
+  }
+  console.log("✅ Conectado a MySQL");
+});
 
-//seteamos las variables de entorno
-dotenv.config({path: './env/.env'})
+// Aquí defines tus rutas
+app.use("/auth", require("./modules/auth/auth.routes"));
 
-//para poder trabajar con las cookies
-app.use(cookieParser())
+// app.use("/productos", require("./src/modules/productos/productos.routes"));
+// etc...
 
-//Llamar al router
-app.use('/',require('./routes/router'))
-
-app.use(function(req,res,next){
-    if(!req.user)
-        res.hander('Cache-Control','private, no-cache, no-store, must-revalidate');
-    next();
-})
-
-
-/*app.get('/',(req,res)=>{
-    res.render('index')
-})*/
-
-app.listen(3000, ()=> {
-    console.log('Server Up Running in https://localhost:3000')
-})
+module.exports = app;
