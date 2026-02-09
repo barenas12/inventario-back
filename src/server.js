@@ -5,8 +5,10 @@ const cookieParser = require('cookie-parser');
 const db = require("./config/db");
 const loginDB = require("./config/dbLogin");
 const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 require("dotenv").config();
 const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || "clave_secreta_muy_segura_2024";
 
 const app = express();
 
@@ -17,6 +19,24 @@ app.use(cors({
 }));
 app.use(cookieParser());
 app.use(express.json());
+
+// ✅ MIDDLEWARE DE VERIFICACIÓN DE JWT
+const verificarToken = (req, res, next) => {
+  const token = req.headers['authorization']?.split(' ')[1] || req.headers['x-token'];
+
+  if (!token) {
+    return res.status(401).json({ mensaje: 'Token no proporcionado' });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+    if (err) {
+      console.error('❌ Token inválido:', err.message);
+      return res.status(403).json({ mensaje: 'Token inválido o expirado' });
+    }
+    req.user = decoded;
+    next();
+  });
+};
 
 const authRoutes = require('./modules/auth/auth.routes');
 app.use('/auth', authRoutes);
@@ -55,10 +75,22 @@ app.post('/api/login', (req, res) => {
       return res.status(401).json({ mensaje: 'Credenciales inválidas' });
     }
 
+    // ✅ Generar JWT (válido por 1 hora)
+    const token = jwt.sign(
+      {
+        id: usuario.id,
+        user: usuario.user,
+        role: usuario.role
+      },
+      JWT_SECRET,
+      { expiresIn: '1H' }
+    );
+
     console.log('✅ Login exitoso para:', user);
     
     res.json({
       mensaje: 'Login exitoso ✅',
+      token: token,
       user: usuario.user,
       role: usuario.role
     });
@@ -66,9 +98,11 @@ app.post('/api/login', (req, res) => {
 });
 
 // ✅ RUTA PARA VERIFICAR TOKEN (opcional, para refrescar sesión)
-app.get('/api/verify-token', (req, res) => {
+app.get('/api/verify-token', verificarToken, (req, res) => {
   res.json({
-    mensaje: 'Token válido'
+    mensaje: 'Token válido',
+    user: req.user.user,
+    role: req.user.role
   });
 });
 
@@ -78,7 +112,7 @@ app.post('/api/logout', (req, res) => {
 });
 
 // ✅ Aplicar verificación a las rutas protegidas
-app.post('/api/inventario/implemento', (req, res) => {
+app.post('/api/inventario/implemento', verificarToken, (req, res) => {
   const {
     nombre,
     categoria,
@@ -113,7 +147,7 @@ app.post('/api/inventario/implemento', (req, res) => {
   });
 });
 
-app.get('/api/inventario/implemento', (req, res) => {
+app.get('/api/inventario/implemento', verificarToken, (req, res) => {
   const sql = `SELECT 
 CONCAT('ARCSAS-',
     CASE 
@@ -144,7 +178,7 @@ CONCAT('ARCSAS-',
   })
 });
 
-app.get('/api/inventario/departamento', (req, res) => {
+app.get('/api/inventario/departamento', verificarToken, (req, res) => {
   const sql = 'SELECT * FROM inventario.departamento WHERE estado="Activo" ORDER BY nombre ASC;';
   db.query(sql, (err, results) => {
     if (err) {
@@ -155,7 +189,7 @@ app.get('/api/inventario/departamento', (req, res) => {
   })
 });
 
-app.get('/api/inventario/responsable', (req, res) => {
+app.get('/api/inventario/responsable', verificarToken, (req, res) => {
   const sql = 'SELECT * FROM inventario.responsable WHERE Estado="Activo" ORDER BY nombre ASC;';
   db.query(sql, (err, results) => {
     if (err) {
@@ -166,7 +200,7 @@ app.get('/api/inventario/responsable', (req, res) => {
   })
 });
 
-app.get('/api/inventario/cat_implemento/:categoria', (req, res) => {
+app.get('/api/inventario/cat_implemento/:categoria', verificarToken, (req, res) => {
   const categoria = req.params.categoria;
   const sql = 'SELECT * FROM inventario.cat_implemento WHERE categoria = ? ORDER BY nom_implemento ASC;';
   db.query(sql, [categoria], (err, results) => {
@@ -178,7 +212,7 @@ app.get('/api/inventario/cat_implemento/:categoria', (req, res) => {
   });
 });
 
-app.get('/api/inventario/implemento/:id', (req, res) => {
+app.get('/api/inventario/implemento/:id', verificarToken, (req, res) => {
   const id = req.params.id;
   const sql = `SELECT 
   implemento.nombre, 
@@ -213,7 +247,7 @@ WHERE implemento.id = ?;`;
   });
 });
 
-app.get('/api/inventario/implemento/categoria/:categoria', (req, res) => {
+app.get('/api/inventario/implemento/categoria/:categoria', verificarToken, (req, res) => {
   const { categoria } = req.params;
   const sql = 'SELECT * FROM inventario.implemento WHERE categoria = ?';
 
@@ -223,7 +257,7 @@ app.get('/api/inventario/implemento/categoria/:categoria', (req, res) => {
   });
 });
 
-app.put('/api/inventario/implemento/:id', (req, res) => {
+app.put('/api/inventario/implemento/:id', verificarToken, (req, res) => {
   const {
     nombre,
     categoria,
@@ -259,7 +293,7 @@ app.put('/api/inventario/implemento/:id', (req, res) => {
   });
 });
 
-app.get("/api/exportar", async (req, res) => {
+app.get("/api/exportar", verificarToken, async (req, res) => {
   const sql = `
     SELECT 
       CONCAT('ARCSAS-',
