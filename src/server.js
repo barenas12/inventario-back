@@ -22,7 +22,7 @@ app.use(express.json());
 
 // ✅ MIDDLEWARE DE VERIFICACIÓN DE JWT
 const verificarToken = (req, res, next) => {
-  const token = req.headers['authorization']?.split(' ')[1] || req.headers['x-token'];
+  const token = req.headers['authorization']?.split(' ')[1] || req.headers['x-token'] || req.query.token;
 
   if (!token) {
     return res.status(401).json({ mensaje: 'Token no proporcionado' });
@@ -36,6 +36,20 @@ const verificarToken = (req, res, next) => {
     req.user = decoded;
     next();
   });
+};
+
+// ✅ MIDDLEWARE DE VERIFICACIÓN DE ROL ADMINISTRADOR
+const verificarAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ mensaje: 'Usuario no autenticado' });
+  }
+
+  if (req.user.role !== 'administrador') {
+    console.warn(`⚠️ Acceso denegado - Usuario ${req.user.user} (${req.user.role}) intentó realizar acción administrativa`);
+    return res.status(403).json({ mensaje: 'Acceso denegado - Requiere rol de administrador' });
+  }
+
+  next();
 };
 
 const authRoutes = require('./modules/auth/auth.routes');
@@ -112,7 +126,7 @@ app.post('/api/logout', (req, res) => {
 });
 
 // ✅ Aplicar verificación a las rutas protegidas
-app.post('/api/inventario/implemento', verificarToken, (req, res) => {
+app.post('/api/inventario/implemento', verificarToken, verificarAdmin, (req, res) => {
   const {
     nombre,
     categoria,
@@ -257,7 +271,7 @@ app.get('/api/inventario/implemento/categoria/:categoria', verificarToken, (req,
   });
 });
 
-app.put('/api/inventario/implemento/:id', verificarToken, (req, res) => {
+app.put('/api/inventario/implemento/:id', verificarToken, verificarAdmin, (req, res) => {
   const {
     nombre,
     categoria,
@@ -293,7 +307,7 @@ app.put('/api/inventario/implemento/:id', verificarToken, (req, res) => {
   });
 });
 
-app.get("/api/exportar", verificarToken, async (req, res) => {
+app.get("/api/exportar", verificarToken, verificarAdmin, async (req, res) => {
   const sql = `
     SELECT 
       CONCAT('ARCSAS-',
