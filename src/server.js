@@ -38,13 +38,20 @@ const verificarToken = (req, res, next) => {
   });
 };
 
+// helper para normalizar y comprobar roles
+function roleIsAdmin(rawRole) {
+  if (!rawRole) return false;
+  const r = String(rawRole).toLowerCase();
+  return r === 'admin' || r === 'administrador' || r === 'administrador' || r === 'administrador';
+}
+
 // ✅ MIDDLEWARE DE VERIFICACIÓN DE ROL ADMINISTRADOR
 const verificarAdmin = (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({ mensaje: 'Usuario no autenticado' });
   }
 
-  if (req.user.role !== 'administrador') {
+  if (!roleIsAdmin(req.user.role)) {
     console.warn(`⚠️ Acceso denegado - Usuario ${req.user.user} (${req.user.role}) intentó realizar acción administrativa`);
     return res.status(403).json({ mensaje: 'Acceso denegado - Requiere rol de administrador' });
   }
@@ -64,7 +71,7 @@ app.post('/api/login', (req, res) => {
   }
 
   const sql = `
-    SELECT id, user, password_hash, role
+    SELECT id, user, password_hash, role, reset_pass
     FROM users
     WHERE user = ? AND status = 'Activo'
     LIMIT 1;
@@ -77,7 +84,6 @@ app.post('/api/login', (req, res) => {
     }
 
     if (!results || results.length === 0) {
-      console.log('❌ Usuario no encontrado:', user);
       return res.status(401).json({ mensaje: 'Credenciales inactivas o no encontradas' });
     }
 
@@ -85,30 +91,80 @@ app.post('/api/login', (req, res) => {
     const passwordOk = await bcrypt.compare(password, usuario.password_hash);
 
     if (!passwordOk) {
-      console.log('❌ Contraseña incorrecta para:', user);
       return res.status(401).json({ mensaje: 'Credenciales inválidas' });
     }
 
-    // ✅ Generar JWT (válido por 1 hora)
+    const normalizedRole = roleIsAdmin(usuario.role) ? 'admin' : 'user';
     const token = jwt.sign(
-      {
-        id: usuario.id,
-        user: usuario.user,
-        role: usuario.role
-      },
+      { id: usuario.id, user: usuario.user, role: normalizedRole },
       JWT_SECRET,
       { expiresIn: '1H' }
     );
 
-    console.log('✅ Login exitoso para:', user);
-    
+    // ✅ NUEVO: indicar si debe cambiar contraseña
+    const mustChangePassword = String(usuario.reset_pass).toLowerCase() === 'si';
+
     res.json({
       mensaje: 'Login exitoso ✅',
-      token: token,
+      token,
       user: usuario.user,
-      role: usuario.role
+      role: usuario.role,
+      mustChangePassword   // <-- frontend lo detecta
     });
   });
+});
+
+// ✅ NUEVA RUTA: Cambio de contraseña en primer login
+// ✅ RUTA: Cambio de contraseña en primer login
+app.put('/api/login/change-password', verificarToken, async (req, res) => {
+  const { nuevaContrasena } = req.body;
+  const userId = req.user.id;
+
+  if (!nuevaContrasena) {
+    return res.status(400).json({ mensaje: 'La contraseña es requerida' });
+  }
+
+  // ✅ Validar requisitos en el backend (seguridad real)
+  const requisitos = [
+    { regex: /.{8,}/,        texto: 'Mínimo 8 caracteres' },
+    { regex: /[A-Z]/,        texto: 'Al menos 1 letra mayúscula' },
+    { regex: /[a-z]/,        texto: 'Al menos 1 letra minúscula' },
+    { regex: /[0-9]/,        texto: 'Al menos 1 número' },
+    { regex: /[^A-Za-z0-9]/, texto: 'Al menos 1 carácter especial (!@#$...)' },
+  ];
+
+  const fallidos = requisitos.filter(r => !r.regex.test(nuevaContrasena));
+  if (fallidos.length > 0) {
+    return res.status(400).json({
+      mensaje: 'La contraseña no cumple los requisitos: ' + fallidos.map(f => f.texto).join(', ')
+    });
+  }
+
+  try {
+    const salt = await bcrypt.genSalt(10);
+    const hash = await bcrypt.hash(nuevaContrasena, salt);
+
+    const sql = `
+      UPDATE login.users
+      SET password_hash = ?, reset_pass = 'No'
+      WHERE id = ?;
+    `;
+
+    loginDB.query(sql, [hash, userId], (err, result) => {
+      if (err) {
+        console.error('❌ Error al cambiar contraseña:', err);
+        return res.status(500).json({ mensaje: 'Error al actualizar contraseña' });
+      }
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ mensaje: 'Usuario no encontrado' });
+      }
+      console.log(`✅ Contraseña actualizada para userId: ${userId}`);
+      res.json({ mensaje: '✅ Contraseña actualizada correctamente' });
+    });
+  } catch (e) {
+    console.error('❌ Error generando hash:', e);
+    res.status(500).json({ mensaje: 'Error interno al crear contraseña' });
+  }
 });
 
 // ✅ RUTA PARA VERIFICAR TOKEN (opcional, para refrescar sesión)
@@ -163,25 +219,25 @@ app.post('/api/inventario/implemento', verificarToken, verificarAdmin, (req, res
 
 app.get('/api/inventario/implemento', verificarToken, (req, res) => {
   const sql = `SELECT 
-CONCAT('ARCSAS-',
-    CASE 
-        WHEN i.categoria = 'Muebles' THEN 'M'
-        ELSE 'T'
-        END,i.id) AS id_implemento, i.nombre,i.id, 
-    i.categoria, 
-    d.nombre AS departamento, 
-    i.condicion, 
-    i.pertenencia, 
-    p.nombre_proveedor AS propietario,
-    i.cantidad, 
-    i.valor, 
-    i.estado,
-    i.sede,
-    i.descripcion,
-    r.nombre AS responsable,
-    i.fecha FROM inventario.implemento AS i 
-    LEFT JOIN inventario.departamento AS d ON d.id = i.departamento LEFT JOIN inventario.propietario AS p ON p.id = i.propietario 
-    LEFT JOIN inventario.responsable AS r ON responsable = r.id;`;
+  CONCAT('ARCSAS-',
+      CASE 
+          WHEN i.categoria = 'Muebles' THEN 'M'
+          ELSE 'T'
+          END,i.id) AS id_implemento, i.nombre,i.id, 
+      i.categoria, 
+      d.nombre AS departamento, 
+      i.condicion, 
+      i.pertenencia, 
+      p.nombre_proveedor AS propietario,
+      i.cantidad, 
+      i.valor, 
+      i.estado,
+      i.sede,
+      i.descripcion,
+      r.nombre AS responsable,
+      i.fecha FROM inventario.implemento AS i 
+      LEFT JOIN inventario.departamento AS d ON d.id = i.departamento LEFT JOIN inventario.propietario AS p ON p.id = i.propietario 
+      LEFT JOIN inventario.responsable AS r ON responsable = r.id;`;
 
   db.query(sql, (err, results) => {
     if (err) {
@@ -307,7 +363,7 @@ app.put('/api/inventario/implemento/:id', verificarToken, verificarAdmin, (req, 
   });
 });
 
-app.get("/api/exportar", verificarToken, verificarAdmin, async (req, res) => {
+app.get("/api/exportar/implementos", verificarToken, verificarAdmin, async (req, res) => {
   const sql = `
     SELECT 
       CONCAT('ARCSAS-',
@@ -411,6 +467,271 @@ app.get("/api/exportar", verificarToken, verificarAdmin, async (req, res) => {
     }
   });
 });
+
+app.get('/api/login/users', verificarToken, (req, res) => {
+  const sql = `SELECT 
+    id,
+    user,
+    status,
+    nombre,
+    apellido,
+    reset_pass,
+    CASE 
+        WHEN role = 'Admin' THEN 'Administrador'
+        ELSE 'Gestor'
+    END AS role
+FROM login.users;`;
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener datos:', err);
+      return res.status(500).json({ mensaje: 'Error al obtener datos' });
+    }
+    res.json(results);
+  })
+});
+
+app.get('/api/login/users/:id', verificarToken, (req, res) => {
+  const id = req.params.id;
+  const sql = `SELECT 
+    id,
+    user,
+    status,
+    nombre,
+    apellido,
+    reset_pass,
+    CASE 
+        WHEN role = 'Admin' THEN 'Administrador'
+        ELSE 'Gestor'
+    END AS role
+FROM login.users
+where users.id=?;`;
+  db.query(sql, [id], (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener implementos:', err);
+      return res.status(500).json({ mensaje: 'Error al obtener implementos' });
+    }
+    res.json(results[0]);
+  });
+});
+
+app.put('/api/login/users/:id', verificarToken, verificarAdmin, async (req, res) => {
+  const {
+    nombre,
+    apellido,
+    usuario,
+    rol,
+    estado,
+    reset_pass
+  } = req.body || {};
+
+  const { id } = req.params;
+
+  // determine whether we need to regenerate password
+  const shouldReset = String(reset_pass).toLowerCase() === 'si';
+  let newPlain = null;
+  let passwordHash = null;
+
+  if (shouldReset) {
+    // reuse same default logic as in POST
+    newPlain = `Arcsas${new Date().getFullYear()}/*`;
+    try {
+      const salt = await bcrypt.genSalt(10);
+      passwordHash = await bcrypt.hash(newPlain, salt);
+    } catch (e) {
+      console.error('❌ Error generando hash de contraseña:', e);
+      return res.status(500).json({ mensaje: 'Error al crear contraseña' });
+    }
+  }
+
+  // build SQL depending on reset flag
+  let sql;
+  let params;
+
+  if (shouldReset) {
+    sql = `UPDATE login.users 
+SET 
+    nombre = ?, 
+    apellido = ?, 
+    user = ?,
+    reset_pass = ?,
+    password_hash = ?,
+    role = CASE 
+              WHEN ? = 'Administrador' THEN 'admin'
+              ELSE 'gestor'
+           END,
+    status = ? 
+WHERE id = ?;`;
+    params = [
+      nombre,
+      apellido,
+      usuario,
+      reset_pass,
+      passwordHash,
+      rol,
+      estado,
+      id
+    ];
+  } else {
+    sql = `UPDATE login.users 
+SET 
+    nombre = ?, 
+    apellido = ?, 
+    user = ?,
+    reset_pass = ?,
+    role = CASE 
+              WHEN ? = 'Administrador' THEN 'admin'
+              ELSE 'gestor'
+           END,
+    status = ? 
+WHERE id = ?;`;
+    params = [
+      nombre,
+      apellido,
+      usuario,
+      reset_pass,
+      rol,
+      estado,
+      id
+    ];
+  }
+
+  db.query(sql, params, (err, result) => {
+    if (err) {
+      console.error('❌ Error al actualizar usuario:', err);
+      return res.status(500).json({ mensaje: 'Error al actualizar usuario en la base de datos' });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ mensaje: 'No se encontró el usuario con ese ID' });
+    }
+    const response = { mensaje: '✅ Usuario actualizado correctamente' };
+    if (shouldReset && newPlain) {
+      response.password = newPlain;
+    }
+    return res.json(response);
+  });
+});
+
+app.get("/api/exportar/usuarios", verificarToken, verificarAdmin, async (req, res) => {
+  const sql = `
+    SELECT 
+    id,
+    user,
+    status,
+    nombre,
+    apellido,
+    CASE 
+        WHEN role = 'Admin' THEN 'Administrador'
+        ELSE 'Gestor'
+    END AS role
+FROM login.users;
+  `;
+
+  db.query(sql, async (err, results) => {
+    if (err) {
+      console.error("❌ Error en la consulta:", err);
+      return res.status(500).send("Error exportando datos");
+    }
+
+    try {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Inventario");
+
+      worksheet.columns = [
+        { header: "ID Usuario", key: "id", width: 15 },
+        { header: "Usuario", key: "user", width: 15 },
+        { header: "Estado", key: "status", width: 15 },
+        { header: "Nombre", key: "nombre", width: 20 },
+        { header: "Apellido", key: "apellido", width: 20 },
+        { header: "Rol", key: "role", width: 15 }
+      ];
+
+      results.forEach(row => worksheet.addRow(row));
+
+      worksheet.getRow(1).eachCell(cell => {
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "4472C4" }
+        };
+        cell.alignment = { vertical: "middle", horizontal: "center" };
+        cell.border = {
+          top: { style: "thin" },
+          left: { style: "thin" },
+          bottom: { style: "thin" },
+          right: { style: "thin" }
+        };
+      });
+
+      worksheet.eachRow((row, rowNumber) => {
+        if (rowNumber !== 1) {
+          row.eachCell(cell => {
+            cell.alignment = { vertical: "middle", horizontal: "center" };
+            cell.border = {
+              top: { style: "thin" },
+              left: { style: "thin" },
+              bottom: { style: "thin" },
+              right: { style: "thin" }
+            };
+          });
+        }
+      });
+
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
+      res.setHeader("Content-Disposition", "attachment; filename=inventario.xlsx");
+
+      await workbook.xlsx.write(res);
+      res.end();
+    } catch (error) {
+      console.error("❌ Error generando Excel:", error);
+      res.status(500).send("Error generando Excel");
+    }
+  });
+});
+
+app.post('/api/login/users', verificarToken, verificarAdmin, async (req, res) => {
+  const {
+    nombre,
+    apellido,
+    usuario,
+    rol
+  } = req.body || {};
+
+  // Generar contraseña por defecto: "Arcsas" + año actual + "/*"
+  const defaultPlain = `Arcsas${new Date().getFullYear()}/*`;
+
+  try {
+    const salt = await bcrypt.genSalt(10);
+    const hashed = await bcrypt.hash(defaultPlain, salt);
+
+    const sql = `
+      INSERT INTO login.users (
+        nombre, apellido, user, role, status, password_hash
+      ) VALUES (?, ?, ?, ?, 'Activo', ?);`;
+
+    db.query(sql, [
+      nombre,
+      apellido,
+      usuario,
+      rol === 'Administrador' ? 'admin' : 'gestor',
+      hashed
+    ], (err, result) => {
+      if (err) {
+        console.error('❌ Error al insertar usuario:', err);
+        return res.status(500).json({ mensaje: 'Error al guardar usuario en la base de datos' });
+      }
+      // opcional: devolver la contraseña en claro para que el admin la copie
+      res.json({ mensaje: '✅ Usuario guardado correctamente', password: defaultPlain });
+    });
+  } catch (e) {
+    console.error('❌ Error creando contraseña por defecto:', e);
+    res.status(500).json({ mensaje: 'Error interno al crear contraseña' });
+  }
+});
+
 
 app.listen(PORT, () => {
   console.log(`🚀 API corriendo en http://localhost:${PORT}`);
