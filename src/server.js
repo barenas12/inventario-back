@@ -7,16 +7,32 @@ const loginDB = require("./config/dbLogin");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
+const departmentRoutes = require('./modules/department/department.routes');
+const authRoutes = require('./modules/auth/auth.routes');
+
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "clave_secreta_muy_segura_2024";
 
 const app = express();
 
-// Agrega middlewares necesarios
+// ✅ CORS corregido para permitir toda la red local
 app.use(cors({
-  origin: ["http://127.0.0.1:5500", "http://localhost:5500"],
+  origin: function (origin, callback) {
+    if (
+      !origin ||
+      origin.includes('172.18.22') ||
+      origin.includes('localhost') ||
+      origin.includes('127.0.0.1') ||
+      origin.includes('inventario.arcsas.com.co')
+    ) {
+      callback(null, true);
+    } else {
+      callback(new Error('No permitido por CORS'));
+    }
+  },
   credentials: true
 }));
+
 app.use(cookieParser());
 app.use(express.json());
 
@@ -42,7 +58,7 @@ const verificarToken = (req, res, next) => {
 function roleIsAdmin(rawRole) {
   if (!rawRole) return false;
   const r = String(rawRole).toLowerCase();
-  return r === 'admin' || r === 'administrador' || r === 'administrador' || r === 'administrador';
+  return r === 'admin' || r === 'administrador';
 }
 
 // ✅ MIDDLEWARE DE VERIFICACIÓN DE ROL ADMINISTRADOR
@@ -58,9 +74,9 @@ const verificarAdmin = (req, res, next) => {
 
   next();
 };
-
-const authRoutes = require('./modules/auth/auth.routes');
+// TODO: Acá van todas las rutas
 app.use('/auth', authRoutes);
+app.use('/department', verificarToken, departmentRoutes);
 
 // ✅ RUTA DE LOGIN
 app.post('/api/login', (req, res) => {
@@ -101,7 +117,6 @@ app.post('/api/login', (req, res) => {
       { expiresIn: '1H' }
     );
 
-    // ✅ NUEVO: indicar si debe cambiar contraseña
     const mustChangePassword = String(usuario.reset_pass).toLowerCase() === 'si';
 
     res.json({
@@ -109,12 +124,11 @@ app.post('/api/login', (req, res) => {
       token,
       user: usuario.user,
       role: usuario.role,
-      mustChangePassword   // <-- frontend lo detecta
+      mustChangePassword
     });
   });
 });
 
-// ✅ NUEVA RUTA: Cambio de contraseña en primer login
 // ✅ RUTA: Cambio de contraseña en primer login
 app.put('/api/login/change-password', verificarToken, async (req, res) => {
   const { nuevaContrasena } = req.body;
@@ -124,12 +138,11 @@ app.put('/api/login/change-password', verificarToken, async (req, res) => {
     return res.status(400).json({ mensaje: 'La contraseña es requerida' });
   }
 
-  // ✅ Validar requisitos en el backend (seguridad real)
   const requisitos = [
-    { regex: /.{8,}/,        texto: 'Mínimo 8 caracteres' },
-    { regex: /[A-Z]/,        texto: 'Al menos 1 letra mayúscula' },
-    { regex: /[a-z]/,        texto: 'Al menos 1 letra minúscula' },
-    { regex: /[0-9]/,        texto: 'Al menos 1 número' },
+    { regex: /.{8,}/, texto: 'Mínimo 8 caracteres' },
+    { regex: /[A-Z]/, texto: 'Al menos 1 letra mayúscula' },
+    { regex: /[a-z]/, texto: 'Al menos 1 letra minúscula' },
+    { regex: /[0-9]/, texto: 'Al menos 1 número' },
     { regex: /[^A-Za-z0-9]/, texto: 'Al menos 1 carácter especial (!@#$...)' },
   ];
 
@@ -167,7 +180,7 @@ app.put('/api/login/change-password', verificarToken, async (req, res) => {
   }
 });
 
-// ✅ RUTA PARA VERIFICAR TOKEN (opcional, para refrescar sesión)
+// ✅ RUTA PARA VERIFICAR TOKEN
 app.get('/api/verify-token', verificarToken, (req, res) => {
   res.json({
     mensaje: 'Token válido',
@@ -176,12 +189,12 @@ app.get('/api/verify-token', verificarToken, (req, res) => {
   });
 });
 
-// ✅ RUTA PARA LOGOUT (opcional)
+// ✅ RUTA PARA LOGOUT
 app.post('/api/logout', (req, res) => {
   res.json({ mensaje: 'Sesión cerrada correctamente' });
 });
 
-// ✅ Aplicar verificación a las rutas protegidas
+// ✅ INVENTARIO - CREAR IMPLEMENTO
 app.post('/api/inventario/implemento', verificarToken, verificarAdmin, (req, res) => {
   const {
     nombre,
@@ -217,6 +230,7 @@ app.post('/api/inventario/implemento', verificarToken, verificarAdmin, (req, res
   });
 });
 
+// ✅ INVENTARIO - OBTENER TODOS LOS IMPLEMENTOS
 app.get('/api/inventario/implemento', verificarToken, (req, res) => {
   const sql = `SELECT 
   CONCAT('ARCSAS-',
@@ -245,20 +259,10 @@ app.get('/api/inventario/implemento', verificarToken, (req, res) => {
       return res.status(500).json({ mensaje: 'Error al obtener datos' });
     }
     res.json(results);
-  })
+  });
 });
 
-app.get('/api/inventario/departamento', verificarToken, (req, res) => {
-  const sql = 'SELECT * FROM inventario.departamento WHERE estado="Activo" ORDER BY nombre ASC;';
-  db.query(sql, (err, results) => {
-    if (err) {
-      console.error('❌ Error al obtener datos:', err);
-      return res.status(500).json({ mensaje: 'Error al obtener datos' });
-    }
-    res.json(results);
-  })
-});
-
+// ✅ INVENTARIO - RESPONSABLES
 app.get('/api/inventario/responsable', verificarToken, (req, res) => {
   const sql = 'SELECT * FROM inventario.responsable WHERE Estado="Activo" ORDER BY nombre ASC;';
   db.query(sql, (err, results) => {
@@ -267,12 +271,14 @@ app.get('/api/inventario/responsable', verificarToken, (req, res) => {
       return res.status(500).json({ mensaje: 'Error al obtener datos' });
     }
     res.json(results);
-  })
+  });
 });
 
+// ✅ INVENTARIO - CATEGORÍAS DE IMPLEMENTO
 app.get('/api/inventario/cat_implemento/:categoria', verificarToken, (req, res) => {
   const categoria = req.params.categoria;
   const sql = 'SELECT * FROM inventario.cat_implemento WHERE categoria = ? ORDER BY nom_implemento ASC;';
+  console.log("Categoria:", categoria)
   db.query(sql, [categoria], (err, results) => {
     if (err) {
       console.error('❌ Error al obtener implementos:', err);
@@ -282,6 +288,97 @@ app.get('/api/inventario/cat_implemento/:categoria', verificarToken, (req, res) 
   });
 });
 
+// ✅ INVENTARIO - CATEGORÍAS DE IMPLEMENTO
+app.get('/api/inventario/cat_implemento', verificarToken, (req, res) => {
+  const sql = 'SELECT * FROM inventario.cat_implemento ORDER BY nom_implemento ASC;';
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener datos:', err);
+      return res.status(500).json({ mensaje: 'Error al obtener datos' });
+    }
+    res.json(results);
+  });
+});
+
+app.get('/api/inventario/get_cat_implemento/:id', verificarToken, (req, res) => {
+  const id = req.params.id;
+  const sql = 'SELECT * FROM inventario.cat_implemento WHERE id = ?;';
+  console.log(id)
+  db.query(sql, [id], (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener la categoria:', err);
+      return res.status(500).json({ mensaje: 'Error al obtener la categoria' });
+    }
+    res.json(results[0]);
+  });
+});
+
+app.put('/api/inventario/cat_implemento/:id', verificarToken, verificarAdmin, (req, res) => {
+  const {
+    nombre,
+    estado,
+    categoria
+  } = req.body;
+
+  const { id } = req.params;
+
+  const sql = `UPDATE cat_implemento SET nom_implemento = ?, estado = ?, categoria = ? WHERE id = ?;`;
+
+  db.query(sql, [
+    nombre, estado, categoria, id
+  ], (err, result) => {
+    if (err) {
+      console.error('❌ Error al actualizar:', err);
+      return res.status(500).json({ mensaje: 'Error al actualizar en la base de datos' });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ mensaje: 'No se encontró el departamento con ese ID' });
+    }
+    return res.json({ mensaje: '✅ Datos actualizados correctamente' });
+  });
+});
+
+
+
+app.put('/api/inventario/departamento/:id', verificarToken, verificarAdmin, (req, res) => {
+  const {
+    nombre,
+    estado
+  } = req.body;
+
+  const { id } = req.params;
+
+  const sql = `UPDATE departamento SET nombre = ?, estado = ? WHERE id = ?;`;
+
+  db.query(sql, [
+    nombre, estado, id
+  ], (err, result) => {
+    if (err) {
+      console.error('❌ Error al actualizar:', err);
+      return res.status(500).json({ mensaje: 'Error al actualizar en la base de datos' });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ mensaje: 'No se encontró el departamento con ese ID' });
+    }
+    return res.json({ mensaje: '✅ Datos actualizados correctamente' });
+  });
+});
+
+
+// ✅ INVENTARIO - PROPIETARIOS
+app.get('/api/inventario/propietario/:pertenencia', verificarToken, (req, res) => {
+  const pertenencia = req.params.pertenencia;
+  const sql = 'SELECT * FROM inventario.propietario WHERE pertenencia = ? ORDER BY nombre_proveedor ASC;';
+  db.query(sql, [pertenencia], (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener implementos:', err);
+      return res.status(500).json({ mensaje: 'Error al obtener implementos' });
+    }
+    res.json(results);
+  });
+});
+
+// ✅ INVENTARIO - OBTENER IMPLEMENTO POR ID
 app.get('/api/inventario/implemento/:id', verificarToken, (req, res) => {
   const id = req.params.id;
   const sql = `SELECT 
@@ -317,6 +414,7 @@ WHERE implemento.id = ?;`;
   });
 });
 
+// ✅ INVENTARIO - FILTRAR POR CATEGORÍA
 app.get('/api/inventario/implemento/categoria/:categoria', verificarToken, (req, res) => {
   const { categoria } = req.params;
   const sql = 'SELECT * FROM inventario.implemento WHERE categoria = ?';
@@ -327,6 +425,7 @@ app.get('/api/inventario/implemento/categoria/:categoria', verificarToken, (req,
   });
 });
 
+// ✅ INVENTARIO - ACTUALIZAR IMPLEMENTO
 app.put('/api/inventario/implemento/:id', verificarToken, verificarAdmin, (req, res) => {
   const {
     nombre,
@@ -340,13 +439,14 @@ app.put('/api/inventario/implemento/:id', verificarToken, verificarAdmin, (req, 
     sede,
     descripcion,
     responsable,
-    estado } = req.body;
+    estado
+  } = req.body;
 
   const { id } = req.params;
 
   const sql = `UPDATE implemento SET nombre = ?, categoria = ?, 
     departamento = ?, condicion = ?, pertenencia = ?, propietario = ?, responsable = ?, valor = ?, fecha = ?, 
-    sede = ?, descripcion = ?, estado = ? WHERE id = ?;`
+    sede = ?, descripcion = ?, estado = ? WHERE id = ?;`;
 
   db.query(sql, [
     nombre, categoria, departamento, condicion,
@@ -363,6 +463,7 @@ app.put('/api/inventario/implemento/:id', verificarToken, verificarAdmin, (req, 
   });
 });
 
+// ✅ EXPORTAR IMPLEMENTOS A EXCEL
 app.get("/api/exportar/implementos", verificarToken, verificarAdmin, async (req, res) => {
   const sql = `
     SELECT 
@@ -386,12 +487,9 @@ app.get("/api/exportar/implementos", verificarToken, verificarAdmin, async (req,
       i.descripcion,
       i.estado
     FROM inventario.implemento AS i
-    LEFT JOIN inventario.departamento AS d 
-      ON d.id = i.departamento
-    LEFT JOIN inventario.propietario AS p 
-      ON p.id = i.propietario
-      LEFT JOIN inventario.responsable AS r
-      ON r.id = i.responsable;
+    LEFT JOIN inventario.departamento AS d ON d.id = i.departamento
+    LEFT JOIN inventario.propietario AS p ON p.id = i.propietario
+    LEFT JOIN inventario.responsable AS r ON r.id = i.responsable;
   `;
 
   db.query(sql, async (err, results) => {
@@ -425,38 +523,21 @@ app.get("/api/exportar/implementos", verificarToken, verificarAdmin, async (req,
 
       worksheet.getRow(1).eachCell(cell => {
         cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-        cell.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "4472C4" }
-        };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "4472C4" } };
         cell.alignment = { vertical: "middle", horizontal: "center" };
-        cell.border = {
-          top: { style: "thin" },
-          left: { style: "thin" },
-          bottom: { style: "thin" },
-          right: { style: "thin" }
-        };
+        cell.border = { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "thin" } };
       });
 
       worksheet.eachRow((row, rowNumber) => {
         if (rowNumber !== 1) {
           row.eachCell(cell => {
             cell.alignment = { vertical: "middle", horizontal: "center" };
-            cell.border = {
-              top: { style: "thin" },
-              left: { style: "thin" },
-              bottom: { style: "thin" },
-              right: { style: "thin" }
-            };
+            cell.border = { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "thin" } };
           });
         }
       });
 
-      res.setHeader(
-        "Content-Type",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-      );
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       res.setHeader("Content-Disposition", "attachment; filename=inventario.xlsx");
 
       await workbook.xlsx.write(res);
@@ -468,6 +549,7 @@ app.get("/api/exportar/implementos", verificarToken, verificarAdmin, async (req,
   });
 });
 
+// ✅ USUARIOS - OBTENER TODOS
 app.get('/api/login/users', verificarToken, (req, res) => {
   const sql = `SELECT 
     id,
@@ -487,9 +569,10 @@ FROM login.users;`;
       return res.status(500).json({ mensaje: 'Error al obtener datos' });
     }
     res.json(results);
-  })
+  });
 });
 
+// ✅ USUARIOS - OBTENER POR ID
 app.get('/api/login/users/:id', verificarToken, (req, res) => {
   const id = req.params.id;
   const sql = `SELECT 
@@ -504,35 +587,26 @@ app.get('/api/login/users/:id', verificarToken, (req, res) => {
         ELSE 'Gestor'
     END AS role
 FROM login.users
-where users.id=?;`;
+WHERE users.id = ?;`;
   db.query(sql, [id], (err, results) => {
     if (err) {
-      console.error('❌ Error al obtener implementos:', err);
-      return res.status(500).json({ mensaje: 'Error al obtener implementos' });
+      console.error('❌ Error al obtener usuario:', err);
+      return res.status(500).json({ mensaje: 'Error al obtener usuario' });
     }
     res.json(results[0]);
   });
 });
 
+// ✅ USUARIOS - ACTUALIZAR
 app.put('/api/login/users/:id', verificarToken, verificarAdmin, async (req, res) => {
-  const {
-    nombre,
-    apellido,
-    usuario,
-    rol,
-    estado,
-    reset_pass
-  } = req.body || {};
-
+  const { nombre, apellido, usuario, rol, estado, reset_pass } = req.body || {};
   const { id } = req.params;
 
-  // determine whether we need to regenerate password
   const shouldReset = String(reset_pass).toLowerCase() === 'si';
   let newPlain = null;
   let passwordHash = null;
 
   if (shouldReset) {
-    // reuse same default logic as in POST
     newPlain = `Arcsas${new Date().getFullYear()}/*`;
     try {
       const salt = await bcrypt.genSalt(10);
@@ -543,7 +617,6 @@ app.put('/api/login/users/:id', verificarToken, verificarAdmin, async (req, res)
     }
   }
 
-  // build SQL depending on reset flag
   let sql;
   let params;
 
@@ -555,22 +628,10 @@ SET
     user = ?,
     reset_pass = ?,
     password_hash = ?,
-    role = CASE 
-              WHEN ? = 'Administrador' THEN 'admin'
-              ELSE 'gestor'
-           END,
+    role = CASE WHEN ? = 'Administrador' THEN 'admin' ELSE 'gestor' END,
     status = ? 
 WHERE id = ?;`;
-    params = [
-      nombre,
-      apellido,
-      usuario,
-      reset_pass,
-      passwordHash,
-      rol,
-      estado,
-      id
-    ];
+    params = [nombre, apellido, usuario, reset_pass, passwordHash, rol, estado, id];
   } else {
     sql = `UPDATE login.users 
 SET 
@@ -578,21 +639,10 @@ SET
     apellido = ?, 
     user = ?,
     reset_pass = ?,
-    role = CASE 
-              WHEN ? = 'Administrador' THEN 'admin'
-              ELSE 'gestor'
-           END,
+    role = CASE WHEN ? = 'Administrador' THEN 'admin' ELSE 'gestor' END,
     status = ? 
 WHERE id = ?;`;
-    params = [
-      nombre,
-      apellido,
-      usuario,
-      reset_pass,
-      rol,
-      estado,
-      id
-    ];
+    params = [nombre, apellido, usuario, reset_pass, rol, estado, id];
   }
 
   db.query(sql, params, (err, result) => {
@@ -604,26 +654,18 @@ WHERE id = ?;`;
       return res.status(404).json({ mensaje: 'No se encontró el usuario con ese ID' });
     }
     const response = { mensaje: '✅ Usuario actualizado correctamente' };
-    if (shouldReset && newPlain) {
-      response.password = newPlain;
-    }
+    if (shouldReset && newPlain) response.password = newPlain;
     return res.json(response);
   });
 });
 
+// ✅ EXPORTAR USUARIOS A EXCEL
 app.get("/api/exportar/usuarios", verificarToken, verificarAdmin, async (req, res) => {
   const sql = `
     SELECT 
-    id,
-    user,
-    status,
-    nombre,
-    apellido,
-    CASE 
-        WHEN role = 'Admin' THEN 'Administrador'
-        ELSE 'Gestor'
-    END AS role
-FROM login.users;
+      id, user, status, nombre, apellido,
+      CASE WHEN role = 'Admin' THEN 'Administrador' ELSE 'Gestor' END AS role
+    FROM login.users;
   `;
 
   db.query(sql, async (err, results) => {
@@ -634,7 +676,7 @@ FROM login.users;
 
     try {
       const workbook = new ExcelJS.Workbook();
-      const worksheet = workbook.addWorksheet("Inventario");
+      const worksheet = workbook.addWorksheet("Usuarios");
 
       worksheet.columns = [
         { header: "ID Usuario", key: "id", width: 15 },
@@ -649,39 +691,22 @@ FROM login.users;
 
       worksheet.getRow(1).eachCell(cell => {
         cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-        cell.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "4472C4" }
-        };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "4472C4" } };
         cell.alignment = { vertical: "middle", horizontal: "center" };
-        cell.border = {
-          top: { style: "thin" },
-          left: { style: "thin" },
-          bottom: { style: "thin" },
-          right: { style: "thin" }
-        };
+        cell.border = { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "thin" } };
       });
 
       worksheet.eachRow((row, rowNumber) => {
         if (rowNumber !== 1) {
           row.eachCell(cell => {
             cell.alignment = { vertical: "middle", horizontal: "center" };
-            cell.border = {
-              top: { style: "thin" },
-              left: { style: "thin" },
-              bottom: { style: "thin" },
-              right: { style: "thin" }
-            };
+            cell.border = { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "thin" } };
           });
         }
       });
 
-      res.setHeader(
-        "Content-Type",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-      );
-      res.setHeader("Content-Disposition", "attachment; filename=inventario.xlsx");
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", "attachment; filename=usuarios.xlsx");
 
       await workbook.xlsx.write(res);
       res.end();
@@ -692,15 +717,10 @@ FROM login.users;
   });
 });
 
+// ✅ USUARIOS - CREAR
 app.post('/api/login/users', verificarToken, verificarAdmin, async (req, res) => {
-  const {
-    nombre,
-    apellido,
-    usuario,
-    rol
-  } = req.body || {};
+  const { nombre, apellido, usuario, rol } = req.body || {};
 
-  // Generar contraseña por defecto: "Arcsas" + año actual + "/*"
   const defaultPlain = `Arcsas${new Date().getFullYear()}/*`;
 
   try {
@@ -723,7 +743,6 @@ app.post('/api/login/users', verificarToken, verificarAdmin, async (req, res) =>
         console.error('❌ Error al insertar usuario:', err);
         return res.status(500).json({ mensaje: 'Error al guardar usuario en la base de datos' });
       }
-      // opcional: devolver la contraseña en claro para que el admin la copie
       res.json({ mensaje: '✅ Usuario guardado correctamente', password: defaultPlain });
     });
   } catch (e) {
@@ -732,7 +751,222 @@ app.post('/api/login/users', verificarToken, verificarAdmin, async (req, res) =>
   }
 });
 
+app.post('/api/inventario/departamento', verificarToken, verificarAdmin, (req, res) => {
+  const {
+    nombre,
+  } = req.body || {};
 
-app.listen(PORT, () => {
-  console.log(`🚀 API corriendo en http://localhost:${PORT}`);
+  console.log("Datos recibidos:", req.body);
+
+  const sql = `
+    INSERT INTO inventario.departamento (
+    nombre, estado
+    ) VALUES (?,'Activo')`;
+
+  db.query(sql, [
+    nombre
+  ], (err, result) => {
+    if (err) {
+      console.error('❌ Error al insertar:', err);
+      return res.status(500).json({ mensaje: 'Error al guardar en la base de datos' });
+    }
+    res.json({ mensaje: '✅ Datos guardados correctamente' });
+  });
+});
+
+app.post('/api/inventario/create_implement', verificarToken, verificarAdmin, (req, res) => {
+  const {
+    nombre,
+    categoria
+  } = req.body || {};
+
+  console.log("Datos recibidos:", req.body);
+
+  const sql = `
+    INSERT INTO inventario.cat_implemento (
+    nom_implemento, categoria, estado
+    ) VALUES (?, ?, 'Activo')`;
+
+  db.query(sql, [
+    nombre, categoria
+  ], (err, result) => {
+    if (err) {
+      console.error('❌ Error al insertar:', err);
+      return res.status(500).json({ mensaje: 'Error al guardar en la base de datos' });
+    }
+    res.json({ mensaje: '✅ Datos guardados correctamente' });
+  });
+});
+
+app.get('/api/inventario/departamento/:id', verificarToken, (req, res) => {
+  const id = req.params.id;
+  const sql = `SELECT 
+    id,
+    nombre,
+    estado
+FROM inventario.departamento
+WHERE departamento.id = ?;`;
+  db.query(sql, [id], (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener usuario:', err);
+      return res.status(500).json({ mensaje: 'Error al obtener usuario' });
+    }
+    res.json(results[0]);
+  });
+});
+
+app.put('/api/inventario/departamento/:id', verificarToken, verificarAdmin, (req, res) => {
+  const {
+    nombre,
+    estado
+  } = req.body;
+
+  const { id } = req.params;
+
+  const sql = `UPDATE departamento SET nombre = ?, estado = ? WHERE id = ?;`;
+
+  db.query(sql, [
+    nombre, estado, id
+  ], (err, result) => {
+    if (err) {
+      console.error('❌ Error al actualizar:', err);
+      return res.status(500).json({ mensaje: 'Error al actualizar en la base de datos' });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ mensaje: 'No se encontró el departamento con ese ID' });
+    }
+    return res.json({ mensaje: '✅ Datos actualizados correctamente' });
+  });
+});
+
+app.get("/api/exportar/departamento", verificarToken, verificarAdmin, async (req, res) => {
+  const sql = `
+    SELECT 
+      id, nombre, estado
+    FROM inventario.departamento;
+  `;
+
+  db.query(sql, async (err, results) => {
+    if (err) {
+      console.error("❌ Error en la consulta:", err);
+      return res.status(500).send("Error exportando datos");
+    }
+
+    try {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Usuarios");
+
+      worksheet.columns = [
+        { header: "ID Departamento", key: "id", width: 16 },
+        { header: "Nombre", key: "nombre", width: 35 },
+        { header: "Estado", key: "estado", width: 15 }
+      ];
+
+      results.forEach(row => worksheet.addRow(row));
+
+      worksheet.getRow(1).eachCell(cell => {
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "4472C4" } };
+        cell.alignment = { vertical: "middle", horizontal: "center" };
+        cell.border = { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "thin" } };
+      });
+
+      worksheet.eachRow((row, rowNumber) => {
+        if (rowNumber !== 1) {
+          row.eachCell(cell => {
+            cell.alignment = { vertical: "middle", horizontal: "center" };
+            cell.border = { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "thin" } };
+          });
+        }
+      });
+
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", "attachment; filename=usuarios.xlsx");
+
+      await workbook.xlsx.write(res);
+      res.end();
+    } catch (error) {
+      console.error("❌ Error generando Excel:", error);
+      res.status(500).send("Error generando Excel");
+    }
+  });
+});
+
+
+app.get('/api/inventario/persona', verificarToken, (req, res) => {
+  const sql = 'SELECT * FROM inventario.responsable ORDER BY nombre ASC;';
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener datos:', err);
+      return res.status(500).json({ mensaje: 'Error al obtener datos' });
+    }
+    res.json(results);
+  });
+});
+
+app.post('/api/inventario/create_responsible', verificarToken, verificarAdmin, (req, res) => {
+  const {
+    nombre
+  } = req.body || {};
+
+  console.log("Datos recibidos:", req.body);
+
+  const sql = `
+    INSERT INTO inventario.responsable (
+    nombre, estado
+    ) VALUES (?, 'Activo')`;
+
+  db.query(sql, [
+    nombre
+  ], (err, result) => {
+    if (err) {
+      console.error('❌ Error al insertar:', err);
+      return res.status(500).json({ mensaje: 'Error al guardar en la base de datos' });
+    }
+    res.json({ mensaje: '✅ Datos guardados correctamente' });
+  });
+});
+
+app.get('/api/inventario/get_person/:id', verificarToken, (req, res) => {
+  const id = req.params.id;
+  const sql = 'SELECT * FROM inventario.responsable WHERE id = ?;';
+  console.log(id)
+  db.query(sql, [id], (err, results) => {
+    if (err) {
+      console.error('❌ Error al obtener la categoria:', err);
+      return res.status(500).json({ mensaje: 'Error al obtener la categoria' });
+    }
+    res.json(results[0]);
+  });
+});
+
+app.put('/api/inventario/put_person/:id', verificarToken, verificarAdmin, (req, res) => {
+  const {
+    nombre,
+    estado
+  } = req.body;
+
+  const { id } = req.params;
+
+  const sql = `UPDATE inventario.responsable SET nombre = ?, estado = ? WHERE id = ?;`;
+
+  db.query(sql, [
+    nombre, estado, id
+  ], (err, result) => {
+    if (err) {
+      console.error('❌ Error al actualizar:', err);
+      return res.status(500).json({ mensaje: 'Error al actualizar en la base de datos' });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ mensaje: 'No se encontró el departamento con ese ID' });
+    }
+    return res.json({ mensaje: '✅ Datos actualizados correctamente' });
+  });
+});
+
+
+// ✅ SERVIDOR ESCUCHANDO EN TODA LA RED
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 API corriendo en http://0.0.0.0:${PORT}`);
+  console.log(`🌐 Acceso en red local: http://172.18.22.4:${PORT}`);
 });
